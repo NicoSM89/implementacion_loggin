@@ -1,65 +1,85 @@
 const express = require('express');
+const winston = require('winston');
+
 const app = express();
-const port = 8080;
 
-// Mock data para productos
-const mockProducts = Array.from({ length: 100 }, (_, index) => ({
-    id: index + 1,
-    name: `Product ${index + 1}`,
-    price: Math.floor(Math.random() * 100) + 1, // Random price between 1 and 100
-}));
-
-// Custom error 
-const errorDictionary = {
-    'product_not_found': 'El producto no se encontró.',
-    'invalid_request': 'La solicitud es inválida.',
-    'cart_full': 'El carrito está lleno.',
+// priority
+const levels = {
+    debug: 0,
+    http: 1,
+    info: 2,
+    warning: 3,
+    error: 4,
+    fatal: 5
 };
 
+// colors logging
+const colors = {
+    debug: 'blue',
+    http: 'green',
+    info: 'cyan',
+    warning: 'yellow',
+    error: 'red',
+    fatal: 'magenta'
+};
+
+//  logger development
+const developmentLogger = winston.createLogger({
+    levels: levels,
+    format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+    ),
+    transports: [
+        new winston.transports.Console()
+    ]
+});
+
+// logger production
+const productionLogger = winston.createLogger({
+    levels: levels,
+    transports: [
+        new winston.transports.File({ filename: 'errors.log', level: 'error' })
+    ]
+});
+
 // Middleware
-app.use((err, req, res, next) => {
-    if (errorDictionary[err]) {
-        res.status(400).json({ error: errorDictionary[err] });
-    } else {
-        res.status(500).json({ error: 'Error interno del servidor.' });
-    }
+function loggerMiddleware(req, res, next) {
+    // Log init
+    developmentLogger.http(`${req.method} ${req.url}`);
+
+    // error, register logger of production
+    const originalSend = res.send;
+    res.send = function (data) {
+        if (res.statusCode >= 400) {
+            productionLogger.error(`${res.statusCode} - ${req.method} ${req.url}: ${JSON.stringify(data)}`);
+        }
+        originalSend.apply(res, arguments);
+    };
+
+    next();
+}
+
+// Logs server
+function importantLog() {
+    developmentLogger.info("Este es un log importante.");
+    productionLogger.info("Este es un log importante.");
+}
+
+// Rutes logs
+app.get('/loggerTest', (req, res) => {
+    importantLog();
+    res.send('Logs generados para probar.');
 });
 
-// Endpoint mocking
-app.get('/mockingproducts', (req, res) => {
-    res.json(mockProducts);
+// example logs
+app.get('/', (req, res) => {
+    console.log('Esta es una consola de registro normal.');
+    res.send('Hello World!');
 });
 
-// Endpoint para agregar un producto al carrito
-let cart = []; 
-
-app.post('/add-to-cart/:productId', (req, res, next) => {
-    const productId = parseInt(req.params.productId);
-
-    // Buscar el producto en la lista de productos disponibles
-    const product = mockProducts.find(product => product.id === productId);
-
-    if (!product) {
-        //producto no se encuentra, error de "product_not_found"
-        next('product_not_found');
-        return;
-    }
-
-    if (cart.length >= 10) {
-        // Si el carrito está lleno (capacidad máxima de 10 productos), lanzar un error de "cart_full"
-        next('cart_full');
-        return;
-    }
-
-    // Agregar el producto al carrito
-    cart.push(product);
-
-    // Responder con el producto agregado al carrito
-    res.json({ message: 'Producto agregado al carrito.', product });
-});
-
-
-// Inicializar el servidor
-app.listen(port, () => {
-    console.log(`Servidor corriendo en http://localhost:${port}`);
+// conf server
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+    console.log(`Servidor escuchando en el puerto ${PORT}`);
 });
